@@ -26,29 +26,37 @@ void TestLazyAlloc::run_all() const {
 
     /// benchmark all 3 ways to allocate
 
+    const BenchmarkTimes touch_t =  benchmark_allocation("malloc + page touch", malloc_touch_allocation);
+    /// init time here is slow as the page faults happen here in init instead of first write.
+    /// first write here is fast and same as all writes
+
     /// Lazy allocation - Doesnt reserve physical memory (only virtual) until actually used (first write/read)
     const BenchmarkTimes malloc_t = benchmark_allocation("malloc", malloc_allocation);
 
     /// Lazy allocation - In linux, the kernel already gives us zeroed pages, so it knows the calloc writing of zeroes is useless and skip it.
     /// When it skips the calloc writing, it skips the first writes therefore skips the pages mapping, making it not bypass lazy allocation.
-    /// Note: When buffer size below threshold
+    /// Note: When buffer size below kernel threshold, calloc uses memory size < threshold therefore kernel skips lazy allocation,
+    /// making calloc map write and map memory on init.
     const BenchmarkTimes calloc_t = benchmark_allocation("calloc", calloc_allocation);
-    const BenchmarkTimes touch_t =  benchmark_allocation("malloc + page touch", malloc_touch_allocation);
-    /// init time here is slow as the page faults happen here in init instead of first write.
-    /// first write here is fast and same as all writes
 
     std::cout << "=== TIME DIFFERENCES FROM LAZY ALLOCATION [[" << static_cast<double>(size) / ONE_MB << " MiB buffer]] ===" << std::endl;
     const double slowed_down_percent = (malloc_t.first_write / malloc_t.second_write - 1) * 100;
     const double speed_gain_percent = (1 - malloc_t.second_write / malloc_t.first_write) * 100;
+    const double speed_gain_touching_percent = (1 - touch_t.first_write / malloc_t.first_write) * 100;
 
     std::cout << "Lazy allocation slowed our first write by: " << slowed_down_percent << "%" << std::endl;
     std::cout << "Inversely, getting rid of lazy allocation would speed up our first write by: " << speed_gain_percent << "%" << std::endl;
+    std::cout << "Actual first-write speed up with page-touching: " << speed_gain_touching_percent << "%" << std::endl;
 
-    const double time_gained_by_touch = malloc_t.total() - touch_t.total();
-    std::cout << "Saved " << time_gained_by_touch << " [us] total with [malloc + touch] (" << (time_gained_by_touch / malloc_t.total() * 100) << "% faster)\n" << std::endl;
+    /// The difference in total time is caused by the kernel not unmapping everything. When we don't have much memory, the kernel doesn't
+    /// unmap it until needed, even if freed. This causes the first allocation test to be the slowest,
+    /// making this "time_gained_by_touch" false as the time-saving factor was the cached memory, not lazy allocation
+    // const double time_gained_by_touch = malloc_t.total() - touch_t.total();
+    // std::cout << "Saved " << time_gained_by_touch << " [us] total with [malloc + touch] (" << (time_gained_by_touch / malloc_t.total() * 100) << "% faster)\n" << std::endl;
 
-    /// I don't know what causes this behaviour
-    if (calloc_t.init < touch_t.init) {
+    constexpr double calloc_writes_diff_thresh = 0.05;
+    const double calloc_writes_diff_percent = std::abs(calloc_t.first_write - calloc_t.second_write) / ((calloc_t.first_write + calloc_t.second_write) / 2);
+    if (calloc_writes_diff_percent < calloc_writes_diff_thresh) {
         std::cout << "Calloc bypassed lazy allocation, like [malloc + touch]" << std::endl;
     }
     else {
@@ -89,7 +97,7 @@ TestLazyAlloc::BenchmarkTimes TestLazyAlloc::benchmark_allocation(const char* al
     /// print and save the writes
     const double first_write_t = timed_write("first write", buf);
     const double second_write_t = timed_write("second write", buf);
-    timed_write("third write", buf); // make sure it's equivalent to second write just in case - sanity check
+    // timed_write("third write", buf); // make sure it's equivalent to second write just in case - sanity check
 
     std::cout << std::endl;
     free(buf);

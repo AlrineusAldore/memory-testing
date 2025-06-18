@@ -2,7 +2,7 @@
 
 
 int main() {
-    const TestLazyAlloc tester(31);
+    const TestLazyAlloc tester(64);
     tester.run_all();
 
     return 0;

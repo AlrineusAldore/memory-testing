@@ -11,7 +11,8 @@
 
 class TestLazyAlloc {
 public:
-    explicit TestLazyAlloc(int size_in_MB = 64);
+    /// 128 MiB is big enough to disregard caching of small memory between runs
+    explicit TestLazyAlloc(int size_in_MB = 128);
 
     void run_all() const;
 
